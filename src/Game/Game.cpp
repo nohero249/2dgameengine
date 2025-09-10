@@ -4,7 +4,6 @@
 #include "../../lib/glm/glm.hpp"
 
 
-
 Game::Game()
 {
     this->isRunning = false;
@@ -16,8 +15,10 @@ Game::~Game()
 
 }
 
+
 glm::vec2 projectilePos = glm::vec2(0.0f, 0.0f);
 glm::vec2 projectileVel = glm::vec2(20.0f, 20.0f);
+
 
 bool Game::IsRunning() const
 {
