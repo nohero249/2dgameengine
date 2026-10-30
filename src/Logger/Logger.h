@@ -1,5 +1,7 @@
 #pragma once
 
+#include <iostream>
+
 enum LogType
 {
     LOG_INFO,
