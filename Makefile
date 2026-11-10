@@ -1,4 +1,5 @@
-CXX = g++
+# Переключаемся на актуальный компилятор из Homebrew
+CXX = /opt/homebrew/opt/llvm/bin/clang++
 CXXFLAGS = -Wall -std=c++17 -I./libs/ -I/opt/homebrew/include
 LDFLAGS = -L/opt/homebrew/lib -lSDL3 -lSDL3_image -lSDL3_ttf -lSDL3_mixer -llua
 SRCFLAGS = src/*.cpp src/ECS/*.cpp src/Game/*.cpp src/Logger/*.cpp src/AssetStore/*.cpp

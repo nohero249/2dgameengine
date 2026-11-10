@@ -13,12 +13,26 @@
 #include "../Components/SpriteComponent.h"
 #include "../Components/AnimationComponent.h"
 #include "../Components/BoxColliderComponent.h"
+#include "../Components/KeyboardControlledComponent.h"
+#include "../Components/CameraFollowComponent.h"
+#include "../Components/HealthComponent.h"
+#include "../Components/ProjectileEmitterComponent.h"
 
 #include "../Systems/MovementSystem.h"
 #include "../Systems/RenderSystem.h"
 #include "../Systems/AnimationSystem.h"
 #include "../Systems/CollisionSystem.h"
 #include "../Systems/RenderColliderSystem.h"
+#include "../Systems/DamageSystem.h"
+#include "../Systems/KeyboardControlSystem.h"
+#include "../Systems/CameraMovementSystem.h"
+#include "../Systems/ProjectileEmitSystem.h"
+#include "../Systems/ProjectileLifecycleSystem.h"
+
+int Game::windowWidth;
+int Game::windowHeight;
+int Game::mapWidth;
+int Game::mapHeight;
 
 Game::Game()
 {
@@ -26,6 +40,7 @@ Game::Game()
     isDebug = false;
     registry = std::make_unique<Registry>();
     assetStore = std::make_unique<AssetStore>();
+    eventBus = std::make_unique<EventBus>();
     Logger::Log("Game constructor called!");
 }
 
@@ -36,46 +51,62 @@ Game::~Game()
 
 void Game::Initialize()
 {
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO))
+    // 1. Исправленная проверка инициализации SDL3
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == false)
     {
-        Logger::Err("Error initializing SDL3!");
+        Logger::Err("Error initializing SDL3! SDL_Error: " + std::string(SDL_GetError()));
         return;
     }
 
-    // const SDL_DisplayMode* displayMode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
-    // if (displayMode)
-    // {
-    //     windowWidth = displayMode->w;
-    //     windowHeight = displayMode->h;
-    // }
-
-    // Setup window
+    // 2. Безопасное получение размеров экрана
     SDL_DisplayID primary_display = SDL_GetPrimaryDisplay();
     const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(primary_display);
-    windowWidth = mode->w;
-    windowHeight = mode->h;
-    Logger::Log("Window width - " + std::to_string(mode->w));
-    Logger::Log("Window height - " + std::to_string(mode->h));
-    window = SDL_CreateWindow(
-        NULL, 
-        windowWidth,
-        windowHeight,
-        SDL_WINDOW_BORDERLESS
-    );
-    if (!window)
-    { 
-        Logger::Err("Error creating SDL window!");
+    
+    if (!mode) 
+    {
+        Logger::Err("Failed to get current display mode! SDL_Error: " + std::string(SDL_GetError()));
         return;
     }
+
+    windowWidth = mode->w;
+    windowHeight = mode->h;
+    Logger::Log("Window width - " + std::to_string(windowWidth));
+    Logger::Log("Window height - " + std::to_string(windowHeight));
+
+    // 3. Создание окна сразу в режиме Fullscreen (в SDL3 это автоматически без рамок)
+    window = SDL_CreateWindow(
+        "My Game",        // Заголовок окна (лучше передать строку, а не NULL)
+        windowWidth,
+        windowHeight,
+        SDL_WINDOW_FULLSCREEN // Создает окно во весь экран с разрешением рабочего стола
+    );
+
+    if (!window)
+    { 
+        Logger::Err("Error creating SDL window! SDL_Error: " + std::string(SDL_GetError()));
+        return;
+    }
+
+    // 4. Создание рендерера (второй аргумент NULL означает выбор драйвера по умолчанию)
     renderer = SDL_CreateRenderer(window, NULL);
     if (!renderer)
     {
-        Logger::Err("Error creating SDL renderer!");
+        Logger::Err("Error creating SDL renderer! SDL_Error: " + std::string(SDL_GetError()));
         return;        
     }
-    SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+
+    // Инициализация камеры (так как координаты дробные, используем SDL_FRect)
+    camera.x = 0.0f;
+    camera.y = 0.0f;
+    camera.w = static_cast<float>(windowWidth);
+    camera.h = static_cast<float>(windowHeight);
+
+    Logger::Log("Camera width - " + std::to_string(camera.w));
+    Logger::Log("Camera height - " + std::to_string(camera.h));
+
     isRunnung = true;
 }
+
 
 void Game::Run()
 {
@@ -106,7 +137,9 @@ void Game::ProcessInput()
                 isRunnung = false;
                 break;
             }
-            if (sdlEvent.key.key == SDLK_D) isDebug = !isDebug;
+            if (sdlEvent.key.key == SDLK_P) isDebug = !isDebug;
+            eventBus->EmitEvent<KeyPressedEvent>(sdlEvent.key.key);
+            break;
         default:
             break;
         }
@@ -121,18 +154,23 @@ void Game::LoadLevel(int level)
     registry->AddSystem<AnimationSystem>();
     registry->AddSystem<CollisionSystem>();
     registry->AddSystem<RenderColliderSystem>();
-
+    registry->AddSystem<DamageSystem>();
+    registry->AddSystem<KeyboardControlSystem>();
+    registry->AddSystem<CameraMovementSystem>();
+    registry->AddSystem<ProjectileEmitSystem>();
+    registry->AddSystem<ProjectileLifecicleSystem>();
 
     // Adding assets to the asset store
     assetStore->AddTexture(renderer, "tank-image", "./assets/images/tank-panther-right.png");
     assetStore->AddTexture(renderer, "truck-image", "./assets/images/truck-ford-right.png");
-    assetStore->AddTexture(renderer, "chopper-image", "./assets/images/chopper.png");
+    assetStore->AddTexture(renderer, "chopper-image", "./assets/images/chopper-spritesheet.png");
     assetStore->AddTexture(renderer, "radar-image", "./assets/images/radar.png");
-    assetStore->AddTexture(renderer, "tilemap-jungle", "./assets/tilemaps/jungle.png");
+    assetStore->AddTexture(renderer, "tilemap-image", "./assets/tilemaps/jungle.png");
+    assetStore->AddTexture(renderer, "bullet-image", "./assets/images/bullet.png");
 
     // Load the tilemap
     int tileSize = 32;
-    double tileScale = 2.f;
+    int tileScale = 4;
     int mapNumCols = 25;
     int mapNumRows = 20;
 
@@ -149,50 +187,57 @@ void Game::LoadLevel(int level)
             mapFile.ignore();
 
             Entity tile = registry->CreateEntity();
-            tile.AddComponent<TransformComponent>
-            (
-                glm::vec2(x * (tileScale * tileSize), y * (tileScale * tileSize)),
-                glm::vec2(tileScale, tileScale),
-                0.0
-            );
-            tile.AddComponent<SpriteComponent>
-            (
-                "tilemap-jungle",
-                tileSize,
-                tileSize,
-                srcRectX,
-                srcRectY,
-                0
-            );
+            tile.Group("tiles");
+            tile.AddComponent<TransformComponent>(glm::vec2(x * (tileScale * tileSize), y * (tileScale * tileSize)), glm::vec2(tileScale, tileScale), 0.0);
+            tile.AddComponent<SpriteComponent>("tilemap-image", tileSize, tileSize, 0, false, srcRectX, srcRectY);
         }
     }
     mapFile.close();
+    mapWidth = mapNumCols * tileSize * tileScale;
+    mapHeight = mapNumRows * tileSize * tileScale;
 
     // Create an entity
+    // Chopper (Игрок)
+    Entity chopper = registry->CreateEntity();
+    chopper.Tag("player");
+    chopper.AddComponent<TransformComponent>(glm::vec2(10.0, 100.0), glm::vec2(1.0, 1.0), 0.0);
+    chopper.AddComponent<RigidBodyComponent>(glm::vec2(0.0, 0.0));
+    chopper.AddComponent<SpriteComponent>("chopper-image", 32, 32, 9, false, 0, 0); // Добавлены zIndex и координаты
+    chopper.AddComponent<AnimationComponent>(2, 15, true);
+    chopper.AddComponent<BoxColliderComponent>(32, 32);
+    chopper.AddComponent<ProjectileEmitterComponent>(glm::vec2(150.0, 150.0), 0, 10000, 10, true);
+    chopper.AddComponent<KeyboardControlledComponent>(glm::vec2(0, -50), glm::vec2(50, 0), glm::vec2(0, 50), glm::vec2(-50, 0));
+    chopper.AddComponent<CameraFollowComponent>();
+    chopper.AddComponent<HealthComponent>(100);
+    
     // Radar
     Entity radar = registry->CreateEntity();
-    radar.AddComponent<TransformComponent>(glm::vec2(windowWidth - 200, 15.0), glm::vec2(3.0, 3.0), 0.0);
-    radar.AddComponent<SpriteComponent>("radar-image", 64, 64, 0.0, 0.0, 10);
+    radar.AddComponent<TransformComponent>(glm::vec2(windowWidth - 74, 10.0), glm::vec2(1.0, 1.0), 0.0);
+    radar.AddComponent<RigidBodyComponent>(glm::vec2(0.0, 0.0));
+    radar.AddComponent<SpriteComponent>("radar-image", 64, 64, 10, true, 0, 0); // Полный набор параметров
     radar.AddComponent<AnimationComponent>(8, 5, true);
-    // Choper
-    Entity chopper = registry->CreateEntity();
-    chopper.AddComponent<TransformComponent>(glm::vec2(200.0, 200.0), glm::vec2(2.0, 2.0), 0.0);
-    chopper.AddComponent<RigidBodyComponent>(glm::vec2(100.0, 0.0));
-    chopper.AddComponent<SpriteComponent>("chopper-image", 32, 32, 0.0, 0.0, 9);
-    chopper.AddComponent<AnimationComponent>(2, 20, true);
-    chopper.AddComponent<BoxColliderComponent>(32, 32);
+    
     // Tank
     Entity tank = registry->CreateEntity();
-    tank.AddComponent<TransformComponent>(glm::vec2(200.0, 400.0), glm::vec2(2.0, 2.0), 0.0);
-    tank.AddComponent<RigidBodyComponent>(glm::vec2(30.0, 0.0));
-    tank.AddComponent<SpriteComponent>("tank-image", 32, 32, 0.0, 0.0, 2);
+    tank.Tag("enemy");
+    tank.Group("enemies");
+    tank.AddComponent<TransformComponent>(glm::vec2(500.0, 10.0), glm::vec2(1.0, 1.0), 0.0);
+    tank.AddComponent<RigidBodyComponent>(glm::vec2(0.0, 0.0));
+    tank.AddComponent<SpriteComponent>("tank-image", 32, 32, 2, false, 0, 0); // Передаем корректный zIndex (2) и зануляем srcRect
     tank.AddComponent<BoxColliderComponent>(32, 32);
+    tank.AddComponent<ProjectileEmitterComponent>(glm::vec2(100.0, 0.0), 1000, 3000, 10, false); // isFriendly = false
+    tank.AddComponent<HealthComponent>(100);
+
     // Truck
     Entity truck = registry->CreateEntity();
-    truck.AddComponent<TransformComponent>(glm::vec2(600.0, 400.0), glm::vec2(2.0, 2.0), 0.0);
-    truck.AddComponent<RigidBodyComponent>(glm::vec2(-20.0, 0.0));
-    truck.AddComponent<SpriteComponent>("truck-image", 32, 32, 0.f, 0.f, 1);
+    truck.Tag("enemy");
+    truck.Group("enemies");
+    truck.AddComponent<TransformComponent>(glm::vec2(10.0, 10.0), glm::vec2(1.0, 1.0), 0.0);
+    truck.AddComponent<RigidBodyComponent>(glm::vec2(0.0, 0.0));
+    truck.AddComponent<SpriteComponent>("truck-image", 32, 32, 1, false, 0, 0); // Передаем корректный zIndex (1) и зануляем srcRect
     truck.AddComponent<BoxColliderComponent>(32, 32);
+    truck.AddComponent<ProjectileEmitterComponent>(glm::vec2(0.0, 100.0), 1000, 5000, 10, false); // isFriendly = false
+    truck.AddComponent<HealthComponent>(100);
 }
 
 void Game::Setup()
@@ -209,13 +254,25 @@ void Game::Update()
 
     millisecPreviosFrame = SDL_GetTicks();
 
-    // Ask all systems to update
-    registry->GetSystem<MovementSystem>().Update(deltaTime);
-    registry->GetSystem<AnimationSystem>().Update();
-    registry->GetSystem<CollisionSystem>().Update();
+    // Reset all event handlers for the current frame
+    eventBus->Reset();
+
+    // Perform the subscription of the events for all systems
+    registry->GetSystem<DamageSystem>().SubscribeToEvents(eventBus);
+    registry->GetSystem<KeyboardControlSystem>().SubscribeToEvents(eventBus);
+    registry->GetSystem<ProjectileEmitSystem>().SubscribeToEvents(eventBus);
 
     // Update the registry to process the entities that are waiting to be created/deleted
     registry->Update();
+    // Ask all systems to update
+    registry->GetSystem<MovementSystem>().Update(deltaTime);
+    registry->GetSystem<AnimationSystem>().Update();
+    registry->GetSystem<CollisionSystem>().Update(eventBus);
+    registry->GetSystem<CameraMovementSystem>().Update(camera);
+    registry->GetSystem<ProjectileEmitSystem>().Update(registry);
+    registry->GetSystem<ProjectileLifecicleSystem>().Update();
+
+
 }
 
 void Game::Render()
@@ -226,8 +283,8 @@ void Game::Render()
     //TODO: Render all game objects...
 
     // Invoke all the systems that need to render
-    registry->GetSystem<RenderSystem>().Update(renderer, assetStore);
-    if (isDebug) registry->GetSystem<RenderColliderSystem>().Update(renderer);
+    registry->GetSystem<RenderSystem>().Update(renderer, assetStore, camera);
+    if (isDebug) registry->GetSystem<RenderColliderSystem>().Update(renderer, camera);
 
     SDL_RenderPresent(renderer);
 }

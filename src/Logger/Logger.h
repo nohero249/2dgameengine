@@ -1,6 +1,10 @@
 #pragma once
 
 #include <iostream>
+#include <iostream>
+#include <ctime>
+#include <string>
+#include <vector>
 
 enum LogType
 {
