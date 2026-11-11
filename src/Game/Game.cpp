@@ -146,9 +146,8 @@ void Game::ProcessInput()
     }
 }
 
-void Game::LoadLevel(int level)
-{
-    // Add the Systems that need to be proccessed in game
+void Game::LoadLevel(int level) {
+    // Add the sytems that need to be processed in our game
     registry->AddSystem<MovementSystem>();
     registry->AddSystem<RenderSystem>();
     registry->AddSystem<AnimationSystem>();
@@ -158,7 +157,7 @@ void Game::LoadLevel(int level)
     registry->AddSystem<KeyboardControlSystem>();
     registry->AddSystem<CameraMovementSystem>();
     registry->AddSystem<ProjectileEmitSystem>();
-    registry->AddSystem<ProjectileLifecicleSystem>();
+    registry->AddSystem<ProjectileLifecycleSystem>();
 
     // Adding assets to the asset store
     assetStore->AddTexture(renderer, "tank-image", "./assets/images/tank-panther-right.png");
@@ -170,7 +169,7 @@ void Game::LoadLevel(int level)
 
     // Load the tilemap
     int tileSize = 32;
-    int tileScale = 4;
+    double tileScale = 2.0;
     int mapNumCols = 25;
     int mapNumRows = 20;
 
@@ -197,46 +196,40 @@ void Game::LoadLevel(int level)
     mapHeight = mapNumRows * tileSize * tileScale;
 
     // Create an entity
-    // Chopper (Игрок)
     Entity chopper = registry->CreateEntity();
     chopper.Tag("player");
-    chopper.AddComponent<TransformComponent>(glm::vec2(10.0, 100.0), glm::vec2(1.0, 1.0), 0.0);
+    chopper.AddComponent<TransformComponent>(glm::vec2(240.0, 110.0), glm::vec2(1.0, 1.0), 0.0);
     chopper.AddComponent<RigidBodyComponent>(glm::vec2(0.0, 0.0));
-    chopper.AddComponent<SpriteComponent>("chopper-image", 32, 32, 9, false, 0, 0); // Добавлены zIndex и координаты
+    chopper.AddComponent<SpriteComponent>("chopper-image", 32, 32, 1);
     chopper.AddComponent<AnimationComponent>(2, 15, true);
-    chopper.AddComponent<BoxColliderComponent>(32, 32);
+    chopper.AddComponent<BoxColliderComponent>(32, 25, glm::vec2(0, 5));
     chopper.AddComponent<ProjectileEmitterComponent>(glm::vec2(150.0, 150.0), 0, 10000, 10, true);
     chopper.AddComponent<KeyboardControlledComponent>(glm::vec2(0, -50), glm::vec2(50, 0), glm::vec2(0, 50), glm::vec2(-50, 0));
     chopper.AddComponent<CameraFollowComponent>();
     chopper.AddComponent<HealthComponent>(100);
     
-    // Radar
     Entity radar = registry->CreateEntity();
     radar.AddComponent<TransformComponent>(glm::vec2(windowWidth - 74, 10.0), glm::vec2(1.0, 1.0), 0.0);
     radar.AddComponent<RigidBodyComponent>(glm::vec2(0.0, 0.0));
-    radar.AddComponent<SpriteComponent>("radar-image", 64, 64, 10, true, 0, 0); // Полный набор параметров
+    radar.AddComponent<SpriteComponent>("radar-image", 64, 64, 1, true);
     radar.AddComponent<AnimationComponent>(8, 5, true);
     
-    // Tank
     Entity tank = registry->CreateEntity();
-    tank.Tag("enemy");
     tank.Group("enemies");
-    tank.AddComponent<TransformComponent>(glm::vec2(500.0, 10.0), glm::vec2(1.0, 1.0), 0.0);
+    tank.AddComponent<TransformComponent>(glm::vec2(500.0, 500.0), glm::vec2(1.0, 1.0), 0.0);
     tank.AddComponent<RigidBodyComponent>(glm::vec2(0.0, 0.0));
-    tank.AddComponent<SpriteComponent>("tank-image", 32, 32, 2, false, 0, 0); // Передаем корректный zIndex (2) и зануляем srcRect
-    tank.AddComponent<BoxColliderComponent>(32, 32);
-    tank.AddComponent<ProjectileEmitterComponent>(glm::vec2(100.0, 0.0), 1000, 3000, 10, false); // isFriendly = false
+    tank.AddComponent<SpriteComponent>("tank-image", 32, 32, 1);
+    tank.AddComponent<BoxColliderComponent>(25, 18, glm::vec2(5, 7));
+    tank.AddComponent<ProjectileEmitterComponent>(glm::vec2(100.0, 0.0), 3000, 5000, 10, false);
     tank.AddComponent<HealthComponent>(100);
 
-    // Truck
     Entity truck = registry->CreateEntity();
-    truck.Tag("enemy");
     truck.Group("enemies");
-    truck.AddComponent<TransformComponent>(glm::vec2(10.0, 10.0), glm::vec2(1.0, 1.0), 0.0);
+    truck.AddComponent<TransformComponent>(glm::vec2(120.0, 500.0), glm::vec2(1.0, 1.0), 0.0);
     truck.AddComponent<RigidBodyComponent>(glm::vec2(0.0, 0.0));
-    truck.AddComponent<SpriteComponent>("truck-image", 32, 32, 1, false, 0, 0); // Передаем корректный zIndex (1) и зануляем srcRect
-    truck.AddComponent<BoxColliderComponent>(32, 32);
-    truck.AddComponent<ProjectileEmitterComponent>(glm::vec2(0.0, 100.0), 1000, 5000, 10, false); // isFriendly = false
+    truck.AddComponent<SpriteComponent>("truck-image", 32, 32, 2);
+    truck.AddComponent<BoxColliderComponent>(25, 20, glm::vec2(5, 5));
+    truck.AddComponent<ProjectileEmitterComponent>(glm::vec2(0.0, -100.0), 2000, 5000, 10, false);
     truck.AddComponent<HealthComponent>(100);
 }
 
@@ -270,9 +263,7 @@ void Game::Update()
     registry->GetSystem<CollisionSystem>().Update(eventBus);
     registry->GetSystem<CameraMovementSystem>().Update(camera);
     registry->GetSystem<ProjectileEmitSystem>().Update(registry);
-    registry->GetSystem<ProjectileLifecicleSystem>().Update();
-
-
+    registry->GetSystem<ProjectileLifecycleSystem>().Update();
 }
 
 void Game::Render()

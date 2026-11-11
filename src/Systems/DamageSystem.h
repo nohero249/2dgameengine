@@ -60,22 +60,22 @@ class DamageSystem: public System {
         }
 
         void OnProjectileHitsEnemy(Entity projectile, Entity enemy) {
-            // const auto projectileComponent = projectile.GetComponent<ProjectileComponent>();
+            const auto projectileComponent = projectile.GetComponent<ProjectileComponent>();
 
-            // // Only damage the enemy if projectile is friendly
-            // if (projectileComponent.isFriendly) {
-            //     auto& health = enemy.GetComponent<HealthComponent>();
+            if (projectileComponent.isFriendly) {
+                // Reduce the health of the enemy by the projectile hitPercentDamage
+                auto& health = enemy.GetComponent<HealthComponent>();
 
-            //     // Subtract from enemy health
-            //     health.healthPercentage -= projectileComponent.hitPercentDamage;
+                // Subtract the health of the enemy
+                health.healthPercentage -= projectileComponent.hitPercentDamage;
 
-            //     // Kills the enemy if health reaches zero
-            //     if (health.healthPercentage <= 0) {
-            //         enemy.Kill();
-            //     }
+                // Kills the enemy when health reaches zero
+                if (health.healthPercentage <= 0) {
+                    enemy.Kill();
+                }
 
-            //     // Destroy projectile
-            //     projectile.Kill();
-            // }
+                // Kill the projectile
+                projectile.Kill();
+            }
         }
 };
