@@ -13,6 +13,7 @@ class Game {
     private:
         bool isRunnung;
         bool isDebug;
+        double deltaTime;
         uint64_t millisecPreviosFrame;
         SDL_Window* window{nullptr};
         SDL_Renderer* renderer{nullptr};

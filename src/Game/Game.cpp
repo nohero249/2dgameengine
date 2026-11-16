@@ -3,6 +3,9 @@
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 #include <glm/glm.hpp>
+#include <imgui/imgui.h>
+#include <imgui/backends/imgui_impl_sdl3.h>
+#include <imgui/backends/imgui_impl_sdlrenderer3.h>
 
 #include "Game.h"
 #include "../Logger/Logger.h"
@@ -17,6 +20,7 @@
 #include "../Components/CameraFollowComponent.h"
 #include "../Components/HealthComponent.h"
 #include "../Components/ProjectileEmitterComponent.h"
+#include "../Components/TextLabelComponent.h"
 
 #include "../Systems/MovementSystem.h"
 #include "../Systems/RenderSystem.h"
@@ -28,6 +32,9 @@
 #include "../Systems/CameraMovementSystem.h"
 #include "../Systems/ProjectileEmitSystem.h"
 #include "../Systems/ProjectileLifecycleSystem.h"
+#include "../Systems/RenderTextSystem.h"
+#include "../Systems/RenderHealthBarSystem.h"
+#include "../Systems/RenderGUISystem.h"
 
 int Game::windowWidth;
 int Game::windowHeight;
@@ -51,10 +58,16 @@ Game::~Game()
 
 void Game::Initialize()
 {
-    // 1. Исправленная проверка инициализации SDL3
+    // SDL initialization
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == false)
     {
         Logger::Err("Error initializing SDL3! SDL_Error: " + std::string(SDL_GetError()));
+        return;
+    }
+
+    // SDL_TTF initialization
+    if (!TTF_Init()) {
+        Logger::Err("Error initializing SDL_ttf! SDL_Error: " + std::string(SDL_GetError()));
         return;
     }
 
@@ -95,6 +108,35 @@ void Game::Initialize()
         return;        
     }
 
+    // Imgui init
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+    ImGuiStyle& style = ImGui::GetStyle();
+
+    // --- Скругление углов (в пикселях) ---
+    style.WindowRounding    = 8.0f;  // Скругление самих окон
+    style.ChildRounding     = 6.0f;  // Скругление вложенных областей (BeginChild)
+    style.FrameRounding     = 6.0f;  // Скругление кнопок, полей ввода и чекбоксов
+    style.PopupRounding     = 6.0f;  // Скругление выпадающих списков и контекстных меню
+    style.ScrollbarRounding = 9.0f;  // Скругление полосы прокрутки
+    style.GrabRounding      = 6.0f;  // Скругление бегунка на слайдерах (SliderFloat)
+    style.TabRounding       = 6.0f;  // Скругление вкладок (BeginTabBar)
+    // --- Отступы и воздушность интерфейса ---
+    style.WindowPadding     = ImVec2(12.0f, 12.0f); // Внутренний отступ от краев окна
+    style.FramePadding      = ImVec2(10.0f, 6.0f);  // Внутренний отступ внутри кнопок и полей
+    style.ItemSpacing       = ImVec2(8.0f, 8.0f);   // Расстояние между соседними элементами
+    style.WindowBorderSize  = 1.0f;                 // Тонкая рамка вокруг окна
+    style.FrameBorderSize   = 0.0f;                 // Убрать лишние обводки у кнопок
+    // --- Качество отрисовки дуг ---
+    style.CircleTessellationMaxError = 0.10f; // Делает скругления максимально гладкими
+
+    ImGuiIO& io = ImGui::GetIO();
+    // Укажите путь к любому .ttf файлу в папке вашего проекта (например, assets/fonts/Inter-Regular.ttf)
+    io.Fonts->AddFontFromFileTTF("assets/fonts/Roboto-Regular.ttf", 16.0f);
+
+    ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
+    ImGui_ImplSDLRenderer3_Init(renderer);
+
     // Инициализация камеры (так как координаты дробные, используем SDL_FRect)
     camera.x = 0.0f;
     camera.y = 0.0f;
@@ -126,6 +168,15 @@ void Game::ProcessInput()
     SDL_Event sdlEvent;
     while (SDL_PollEvent(&sdlEvent))
     {
+        ImGui_ImplSDL3_ProcessEvent(&sdlEvent);
+        ImGuiIO& io = ImGui::GetIO();
+
+        float mouseX, mouseY;
+        const int buttons = SDL_GetMouseState(&mouseX, &mouseY);
+        io.MousePos = ImVec2(mouseX, mouseY);
+        io.MouseDown[0] = buttons & SDL_BUTTON_MASK(SDL_BUTTON_LEFT);
+        io.MouseDown[1] = buttons & SDL_BUTTON_MASK(SDL_BUTTON_RIGHT);
+        
         switch (sdlEvent.type)
         {
         case SDL_EVENT_QUIT:
@@ -158,6 +209,9 @@ void Game::LoadLevel(int level) {
     registry->AddSystem<CameraMovementSystem>();
     registry->AddSystem<ProjectileEmitSystem>();
     registry->AddSystem<ProjectileLifecycleSystem>();
+    registry->AddSystem<RenderTextSystem>();
+    registry->AddSystem<RenderHealthBarSystem>();
+    registry->AddSystem<RenderGUISystem>();
 
     // Adding assets to the asset store
     assetStore->AddTexture(renderer, "tank-image", "./assets/images/tank-panther-right.png");
@@ -166,6 +220,10 @@ void Game::LoadLevel(int level) {
     assetStore->AddTexture(renderer, "radar-image", "./assets/images/radar.png");
     assetStore->AddTexture(renderer, "tilemap-image", "./assets/tilemaps/jungle.png");
     assetStore->AddTexture(renderer, "bullet-image", "./assets/images/bullet.png");
+    assetStore->AddFont("charriot-font", "./assets/fonts/charriot.ttf", 26);
+    assetStore->AddFont("charriot-font-12", "./assets/fonts/charriot.ttf", 12);
+    assetStore->AddFont("pico8-font-5", "./assets/fonts/pico8.ttf", 5);
+    assetStore->AddFont("pico8-font-10", "./assets/fonts/pico8.ttf", 10);
 
     // Load the tilemap
     int tileSize = 32;
@@ -207,6 +265,7 @@ void Game::LoadLevel(int level) {
     chopper.AddComponent<KeyboardControlledComponent>(glm::vec2(0, -50), glm::vec2(50, 0), glm::vec2(0, 50), glm::vec2(-50, 0));
     chopper.AddComponent<CameraFollowComponent>();
     chopper.AddComponent<HealthComponent>(100);
+    SDL_Color white = {255, 255, 255, 122};
     
     Entity radar = registry->CreateEntity();
     radar.AddComponent<TransformComponent>(glm::vec2(windowWidth - 74, 10.0), glm::vec2(1.0, 1.0), 0.0);
@@ -231,6 +290,9 @@ void Game::LoadLevel(int level) {
     truck.AddComponent<BoxColliderComponent>(25, 20, glm::vec2(5, 5));
     truck.AddComponent<ProjectileEmitterComponent>(glm::vec2(0.0, -100.0), 2000, 5000, 10, false);
     truck.AddComponent<HealthComponent>(100);
+
+    Entity perfomanceStatsLabel = registry->CreateEntity();
+    perfomanceStatsLabel.AddComponent<TextLabelComponent>(glm::vec2(100, 100), "", "charriot-font-12", white, true);
 }
 
 void Game::Setup()
@@ -243,7 +305,7 @@ void Game::Update()
     // uint32_t timeout = MILLISECS_PER_FRAME - (SDL_GetTicks() - millisecPreviosFrame);
     // if (timeout > 0 && timeout <= MILLISECS_PER_FRAME) SDL_Delay(timeout);
 
-    double deltaTime = (SDL_GetTicks() - millisecPreviosFrame) / 1000.f;
+    deltaTime = (SDL_GetTicks() - millisecPreviosFrame) / 1000.f;
 
     millisecPreviosFrame = SDL_GetTicks();
 
@@ -275,13 +337,21 @@ void Game::Render()
 
     // Invoke all the systems that need to render
     registry->GetSystem<RenderSystem>().Update(renderer, assetStore, camera);
-    if (isDebug) registry->GetSystem<RenderColliderSystem>().Update(renderer, camera);
+    registry->GetSystem<RenderTextSystem>().Update(renderer, assetStore, camera);
+    registry->GetSystem<RenderHealthBarSystem>().Update(renderer, assetStore, camera);
+    if (isDebug) {
+        registry->GetSystem<RenderColliderSystem>().Update(renderer, camera);
 
+        registry->GetSystem<RenderGUISystem>().Update(renderer, registry, camera, deltaTime);
+    }
     SDL_RenderPresent(renderer);
 }
 
 void Game::Destroy()
 {
+    ImGui_ImplSDLRenderer3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
